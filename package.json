@@ -1,6 +1,6 @@
 {
   "name": "steam-protobuf",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "TypeScript Library for Steam Protobuf Encoding & Decoding",
   "author": {
     "name": "v0eak"
