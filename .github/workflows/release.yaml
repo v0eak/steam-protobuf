@@ -1,0 +1,79 @@
+name: Release
+
+on:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      "**/*"
+  pull_request:
+    paths-ignore:
+      "**/*"
+  schedule:
+    - cron: "0 9,21 * * MON-FRI"
+      timezone: America/New_York
+    - cron: "0 0,12 * * SAT,SUN"
+      timezone: America/New_York
+  
+  workflow_dispatch:     # Allows manual trigger
+
+permissions:
+  id-token: write
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Enable Corepack
+        run: corepack enable
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: yarn
+
+      - name: Install dependencies
+        run: yarn install
+
+      - name: Build
+        id: build
+        run: |
+          yarn build
+
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "changes_detected=true" >> $GITHUB_OUTPUT
+          else
+            echo "changes_detected=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Configure git
+        if: steps.build.outputs.changes_detected == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Bump version
+        if: steps.build.outputs.changes_detected == 'true'
+        id: bump
+        run: |
+          yarn version patch -i
+          VERSION=$(node -p "require('./package.json').version")
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Commit changes
+        if: steps.build.outputs.changes_detected == 'true'
+        id: auto_commit
+        uses: stefanzweifel/git-auto-commit-action@v7
+        with:
+          commit_message: "chore: release v${{ steps.bump.outputs.version }}"
+          file_pattern: "protobufs src/generated .steamtracking-sha package.json"
+          tag_name: "v${{ steps.bump.outputs.version }}"
+          tagging_message: "Release v${{ steps.bump.outputs.version }}"
+
+      - name: Publish
+        if: steps.build.outputs.changes_detected == 'true' && steps.auto_commit.outputs.changes_detected == 'true'
+        run: yarn npm publish
