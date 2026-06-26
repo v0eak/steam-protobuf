@@ -44,36 +44,63 @@ jobs:
         run: |
           yarn build
 
-          if [ -n "$(git status --porcelain)" ]; then
-            echo "changes_detected=true" >> $GITHUB_OUTPUT
+          if [ -n "$(git status --porcelain .steamtracking-sha)" ]; then
+            echo "steamtracking_changes=true" >> $GITHUB_OUTPUT
           else
-            echo "changes_detected=false" >> $GITHUB_OUTPUT
+            echo "steamtracking_changes=false" >> $GITHUB_OUTPUT
+          fi
+
+          if [ -n "$(git status --porcelain protobufs src/generated)" ]; then
+            echo "file_changes=true" >> $GITHUB_OUTPUT
+          else
+            echo "file_changes=false" >> $GITHUB_OUTPUT
           fi
 
       - name: Configure git
-        if: steps.build.outputs.changes_detected == 'true'
+        if: steps.build.outputs.steamtracking_changes == 'true' || steps.build.outputs.file_changes == 'true'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
       - name: Bump version
-        if: steps.build.outputs.changes_detected == 'true'
+        if: steps.build.outputs.file_changes == 'true'
         id: bump
         run: |
           yarn version patch -i
           VERSION=$(node -p "require('./package.json').version")
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
+      - name: Commit message
+        if: steps.build.outputs.steamtracking_changes == 'true' || steps.build.outputs.file_changes == 'true'
+        id: commit_message
+        run: |
+          if [[ "${{ steps.build.outputs.steamtracking_changes }}" == "true" ]]; then
+            echo "message=chore: sync SteamTracking" >> "$GITHUB_OUTPUT"
+          elif [[ "${{ steps.build.outputs.file_changes }}" == "true" ]]; then
+            echo "message=chore: release v${{ steps.bump.outputs.version }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Commit tag
+        id: commit_tag
+        run: |
+          if [[ "${{ steps.build.outputs.file_changes }}" == "true" ]]; then
+            echo "tag_name=v${{ steps.bump.outputs.version }}" >> "$GITHUB_OUTPUT"
+            echo "tagging_message=Release v${{ steps.bump.outputs.version }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag_name=" >> "$GITHUB_OUTPUT"
+            echo "tagging_message=" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Commit changes
-        if: steps.build.outputs.changes_detected == 'true'
+        if:  steps.build.outputs.steamtracking_changes == 'true' || steps.build.outputs.file_changes == 'true'
         id: auto_commit
         uses: stefanzweifel/git-auto-commit-action@v7
         with:
-          commit_message: "chore: release v${{ steps.bump.outputs.version }}"
+          commit_message: ${{ steps.commit_message.outputs.message }}
           file_pattern: "protobufs src/generated .steamtracking-sha package.json"
-          tag_name: "v${{ steps.bump.outputs.version }}"
-          tagging_message: "Release v${{ steps.bump.outputs.version }}"
+          tag_name: ${{ steps.commit_tag.outputs.tag_name }}
+          tagging_message: ${{ steps.commit_tag.outputs.tag_message }}
 
       - name: Publish
-        if: steps.build.outputs.changes_detected == 'true' && steps.auto_commit.outputs.changes_detected == 'true'
+        if: steps.build.outputs.file_changes == 'true'
         run: yarn npm publish
