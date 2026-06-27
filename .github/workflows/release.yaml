@@ -39,6 +39,13 @@ jobs:
       - name: Install dependencies
         run: yarn install
 
+      - name: Bump version
+        id: bump
+        run: |
+          yarn version patch -i
+          VERSION=$(node -p "require('./package.json').version")
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
       - name: Build
         id: build
         run: |
@@ -62,22 +69,14 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-      - name: Bump version
-        if: steps.build.outputs.file_changes == 'true'
-        id: bump
-        run: |
-          yarn version patch -i
-          VERSION=$(node -p "require('./package.json').version")
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-
       - name: Commit message
         if: steps.build.outputs.steamtracking_changes == 'true' || steps.build.outputs.file_changes == 'true'
         id: commit_message
         run: |
-          if [[ "${{ steps.build.outputs.steamtracking_changes }}" == "true" ]]; then
-            echo "message=chore: sync SteamTracking" >> "$GITHUB_OUTPUT"
-          elif [[ "${{ steps.build.outputs.file_changes }}" == "true" ]]; then
+          if [[ "${{ steps.build.outputs.file_changes }}" == "true" ]]; then
             echo "message=chore: release v${{ steps.bump.outputs.version }}" >> "$GITHUB_OUTPUT"
+          elif [[ "${{ steps.build.outputs.steamtracking_changes }}" == "true" ]]; then
+            echo "message=chore: sync SteamTracking" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Commit tag
@@ -91,13 +90,22 @@ jobs:
             echo "tagging_message=" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Commit files
+        id: commit_files
+        run: |
+          if [[ "${{ steps.build.outputs.file_changes }}" == "true" ]]; then
+            echo "file_names=protobufs src/generated .steamtracking-sha package.json" >> "$GITHUB_OUTPUT"
+          else
+            echo "file_names=.steamtracking-sha" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Commit changes
         if:  steps.build.outputs.steamtracking_changes == 'true' || steps.build.outputs.file_changes == 'true'
         id: auto_commit
         uses: stefanzweifel/git-auto-commit-action@v7
         with:
           commit_message: ${{ steps.commit_message.outputs.message }}
-          file_pattern: "protobufs src/generated .steamtracking-sha package.json"
+          file_pattern: ${{ steps.commit_files.outputs.file_names }}
           tag_name: ${{ steps.commit_tag.outputs.tag_name }}
           tagging_message: ${{ steps.commit_tag.outputs.tag_message }}
 
